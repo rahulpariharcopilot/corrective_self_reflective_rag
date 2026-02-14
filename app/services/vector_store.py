@@ -11,12 +11,20 @@ from uuid import uuid4
 class VectorStore:
     def __init__(self):
         self.settings = get_settings()
-        self.client = QdrantClient(
-            url=self.settings.qdrant_url,
-            api_key=self.settings.qdrant_api_key
-        )
         self.collection_name = self.settings.qdrant_collection_name
-        self._ensure_collection()
+        self._client = None
+        self._initialized = False
+
+    @property
+    def client(self) -> QdrantClient:
+        """Lazy initialization of Qdrant client"""
+        if self._client is None:
+            self._client = QdrantClient(
+                url=self.settings.qdrant_url,
+                api_key=self.settings.qdrant_api_key if self.settings.qdrant_api_key else None
+            )
+            self._ensure_collection()
+        return self._client
     
     def _ensure_collection(self):
         """Create collection if it doesn't exist"""

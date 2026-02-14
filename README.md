@@ -93,7 +93,7 @@
 ✅ Tavily API Key (for CRAG mode)
 ```
 
-### Installation in 3 Steps
+### Installation
 
 ```bash
 # 1️⃣ Install uv (ultra-fast package manager)
@@ -103,12 +103,33 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 git clone <repo-url>
 cd corrective_self_reflective_rag
 cp .env.example .env
-# Edit .env with your API keys
+# Edit .env with your API keys (OPENAI_API_KEY required, TAVILY_API_KEY for CRAG mode)
 
-# 3️⃣ Start services
-docker run -p 6333:6333 qdrant/qdrant  # Terminal 1
-uv run uvicorn app.main:app --reload   # Terminal 2
+# 3️⃣ Install dependencies
+uv sync
 ```
+
+### Starting the Application
+
+**Option A: Using Docker Compose (Recommended)**
+```bash
+# Start Qdrant with persistent storage
+docker compose up -d
+
+# Start the API server
+uv run uvicorn app.main:app --reload
+```
+
+**Option B: Manual Docker**
+```bash
+# Terminal 1: Start Qdrant
+docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
+
+# Terminal 2: Start API server
+uv run uvicorn app.main:app --reload
+```
+
+> **Note:** The API server will start without Qdrant running, but upload/query operations require Qdrant to be available at `http://localhost:6333`.
 
 🎉 **Done!** API running at http://localhost:8000 • Docs at http://localhost:8000/docs
 
