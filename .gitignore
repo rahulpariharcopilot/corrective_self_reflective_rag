@@ -44,7 +44,6 @@ uv.lock
 # Uploads
 uploads/
 *.pdf
-*.md
 !README.md
 *.txt
 *.json
@@ -66,6 +65,8 @@ htmlcov/
 
 notebooks/*
 notebooks/langchain/*
-test_features.py
-test_backends.py
-*.md
+
+!workflows/*
+archived/*
+workflows/README.md
+.claude/*
