@@ -3,8 +3,10 @@ from qdrant_client.models import (
     Distance, VectorParams, PointStruct,
     Filter, FieldCondition, MatchValue,
     SparseVector, SparseVectorParams, Modifier,
-    Prefetch, FusionQuery, Fusion
+    Prefetch, FusionQuery, Fusion,
+    MultiVectorConfig, MultiVectorComparator
 )
+from app.services.colbert_service import ColbertService
 from app.config import get_settings
 from app.services.sparse_vector_service import SparseVectorService
 from loguru import logger
@@ -20,10 +22,11 @@ class VectorStore:
         )
         self.collection_name = self.settings.qdrant_collection_name
         self.sparse_service = SparseVectorService()
+        self.colbert_service = ColbertService()
         self._ensure_collection()
     
     def _ensure_collection(self):
-        """Create hybrid collection with dense and sparse vectors if it doesn't exist"""
+        """Create hybrid collection with dense, colbert and sparse vectors if it doesn't exist"""
         try:
             collections = self.client.get_collections().collections
             exists = any(c.name == self.collection_name for c in collections)
@@ -35,7 +38,14 @@ class VectorStore:
                         "dense": VectorParams(
                             size=self.settings.embedding_dimensions,
                             distance=Distance.COSINE
-                        )
+                        ),
+                        "colbert": VectorParams(
+                            size=1024,
+                            distance=Distance.COSINE,
+                            multivector_config=MultiVectorConfig(
+                                comparator=MultiVectorComparator.MAX_SIM
+                            )
+                        ) if self.settings.colbert_multivector_enabled else None
                     },
                     sparse_vectors_config={
                         "sparse": SparseVectorParams()
@@ -52,23 +62,32 @@ class VectorStore:
         embeddings: list[list[float]],
         metadatas: list[dict]
     ) -> list[str]:
-        """Insert chunks with both dense and sparse vectors"""
+        """Insert chunks with dense, colbert and sparse vectors"""
         points = []
         chunk_ids = []
+        
+        colbert_vectors = []
+        if self.colbert_service.enabled:
+            colbert_vectors = self.colbert_service.generate_colbert_vectors(chunks)
 
-        for chunk, embedding, metadata in zip(chunks, embeddings, metadatas):
+        for i, (chunk, embedding, metadata) in enumerate(zip(chunks, embeddings, metadatas)):
             chunk_id = str(uuid4())
             chunk_ids.append(chunk_id)
 
             # Generate sparse vector for the chunk
             sparse_vector = self.sparse_service.generate_sparse_vector(chunk)
+            
+            vector_dict = {
+                "dense": embedding,
+                "sparse": sparse_vector
+            }
+            
+            if self.colbert_service.enabled and colbert_vectors:
+                vector_dict["colbert"] = colbert_vectors[i]
 
             points.append(PointStruct(
                 id=chunk_id,
-                vector={
-                    "dense": embedding,
-                    "sparse": sparse_vector
-                },
+                vector=vector_dict,
                 payload={
                     "content": chunk,
                     **metadata
@@ -76,11 +95,17 @@ class VectorStore:
             ))
 
         try:
-            self.client.upsert(
-                collection_name=self.collection_name,
-                points=points
-            )
-            logger.info(f"Upserted {len(points)} chunks with dual vectors")
+            # Upsert in batches to avoid payload size limits (ColBERT vectors are large)
+            batch_size = 5 if self.colbert_service.enabled else 50
+            for i in range(0, len(points), batch_size):
+                batch_points = points[i:i + batch_size]
+                self.client.upsert(
+                    collection_name=self.collection_name,
+                    points=batch_points
+                )
+                logger.info(f"Upserted batch {i//batch_size + 1}: {len(batch_points)} chunks")
+            
+            logger.info(f"Successfully upserted all {len(points)} chunks with dual vectors")
             return chunk_ids
         except Exception as e:
             logger.error(f"Upsert error: {e}")
@@ -141,9 +166,31 @@ class VectorStore:
             with_payload=True
         ).points
 
+    def search_colbert(
+        self,
+        query_text: str,
+        top_k: int,
+        search_filter=None
+    ) -> list:
+        """ColBERT-only multi-vector search"""
+        if not self.colbert_service.enabled:
+            logger.warning("ColBERT search requested but service is disabled")
+            return []
+            
+        colbert_query = self.colbert_service.generate_colbert_vectors([query_text])[0]
+        
+        return self.client.query_points(
+            collection_name=self.collection_name,
+            query=colbert_query,
+            using="colbert",
+            query_filter=search_filter,
+            limit=top_k,
+            with_payload=True
+        ).points
+
     def search(
         self,
-        query_vector: list[float],
+        query_vector: list[float] | None = None,
         top_k: int = 5,
         filter_conditions: dict | None = None,
         mode: str = "hybrid",
@@ -153,11 +200,11 @@ class VectorStore:
         Search for similar chunks using specified mode.
 
         Args:
-            query_vector: Dense embedding vector
+            query_vector: Dense embedding vector (optional if query_text provided and mode is sparse/colbert)
             top_k: Number of results to return
             filter_conditions: Optional filter conditions
-            mode: Search mode - "dense", "sparse", or "hybrid" (default)
-            query_text: Original query text (required for sparse/hybrid modes)
+            mode: Search mode - "dense", "sparse", "colbert", or "hybrid" (default)
+            query_text: Original query text (required for sparse/colbert/hybrid modes)
 
         Returns:
             List of search results with scores and metadata
@@ -170,17 +217,23 @@ class VectorStore:
 
             # Delegate to appropriate search method
             if mode == "dense":
+                if not query_vector:
+                     raise ValueError("query_vector required for dense search")
                 results = self.search_dense(query_vector, top_k, search_filter)
             elif mode == "sparse":
                 if not query_text:
                     raise ValueError("query_text required for sparse search")
                 results = self.search_sparse(query_text, top_k, search_filter)
-            elif mode == "hybrid":
+            elif mode == "colbert":
                 if not query_text:
-                    raise ValueError("query_text required for hybrid search")
+                    raise ValueError("query_text required for colbert search")
+                results = self.search_colbert(query_text, top_k, search_filter)
+            elif mode == "hybrid":
+                if not query_text or not query_vector:
+                    raise ValueError("query_text and query_vector required for hybrid search")
                 results = self.search_hybrid(query_vector, query_text, top_k, search_filter)
             else:
-                raise ValueError(f"Invalid search mode: {mode}. Must be 'dense', 'sparse', or 'hybrid'")
+                raise ValueError(f"Invalid search mode: {mode}. Must be 'dense', 'sparse', 'colbert', or 'hybrid'")
 
             return [
                 {

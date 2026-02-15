@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     voyage_api_key: str | None = None
     voyage_model: str = "rerank-2.5"
 
+    # ColBERT Settings
+    colbert_enabled: bool = True
+    colbert_model: str = "BAAI/bge-m3"
+    colbert_multivector_enabled: bool = True
+
     # Upload
     upload_dir: str = "uploads"
     max_file_size: int = 50 * 1024 * 1024  # 50MB
