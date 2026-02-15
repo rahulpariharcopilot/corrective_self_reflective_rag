@@ -6,25 +6,71 @@ from qdrant_client.models import (
 from app.config import get_settings
 from loguru import logger
 from uuid import uuid4
+import time
 
 
 class VectorStore:
+    MAX_RETRIES = 3
+    RETRY_DELAY = 1.0  # seconds
+
     def __init__(self):
         self.settings = get_settings()
         self.collection_name = self.settings.qdrant_collection_name
         self._client = None
         self._initialized = False
 
+    def _create_client(self) -> QdrantClient:
+        """Create a new Qdrant client instance"""
+        return QdrantClient(
+            url=self.settings.qdrant_url,
+            api_key=self.settings.qdrant_api_key if self.settings.qdrant_api_key else None,
+            timeout=10,
+        )
+
+    def _health_check(self, client: QdrantClient) -> bool:
+        """Verify Qdrant is reachable and healthy"""
+        try:
+            client.get_collections()
+            return True
+        except Exception as e:
+            logger.warning(f"Qdrant health check failed: {e}")
+            return False
+
+    def _connect_with_retry(self) -> QdrantClient:
+        """Connect to Qdrant with retry logic"""
+        last_error = None
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            try:
+                client = self._create_client()
+                if self._health_check(client):
+                    logger.info(f"Connected to Qdrant at {self.settings.qdrant_url}")
+                    return client
+                raise ConnectionError("Health check failed")
+            except Exception as e:
+                last_error = e
+                if attempt < self.MAX_RETRIES:
+                    logger.warning(f"Qdrant connection attempt {attempt} failed, retrying in {self.RETRY_DELAY}s...")
+                    time.sleep(self.RETRY_DELAY)
+
+        raise ConnectionError(f"Failed to connect to Qdrant after {self.MAX_RETRIES} attempts: {last_error}")
+
     @property
     def client(self) -> QdrantClient:
-        """Lazy initialization of Qdrant client"""
+        """Lazy initialization of Qdrant client with health check"""
         if self._client is None:
-            self._client = QdrantClient(
-                url=self.settings.qdrant_url,
-                api_key=self.settings.qdrant_api_key if self.settings.qdrant_api_key else None
-            )
+            self._client = self._connect_with_retry()
+            self._ensure_collection()
+        elif not self._health_check(self._client):
+            logger.warning("Qdrant connection lost, reconnecting...")
+            self._client = self._connect_with_retry()
             self._ensure_collection()
         return self._client
+
+    def reset_connection(self):
+        """Force reconnection on next client access"""
+        self._client = None
+        self._initialized = False
+        logger.info("Qdrant connection reset")
     
     def _ensure_collection(self):
         """Create collection if it doesn't exist"""
