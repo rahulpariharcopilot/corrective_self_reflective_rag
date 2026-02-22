@@ -25,8 +25,8 @@ flowchart TD
 
     subgraph AWS["AWS — us-east-1"]
         ECR["Amazon ECR\ncrag-rag-app\n:SHA  :latest"]
-        S3B["Amazon S3\nelasticbeanstalk-us-east-1-685057748560\n/crag-rag-appp/<version>.zip"]
-        EB["Elastic Beanstalk\ncrag-rag-appp / crag-rag-prod\nt3.medium · Amazon Linux 2 · Docker"]
+        S3B["Amazon S3\nelasticbeanstalk-us-east-1-685057748560\n/crag-rag-app/<version>.zip"]
+        EB["Elastic Beanstalk\ncrag-rag-app / crag-rag-prod\nt3.medium · Amazon Linux 2 · Docker"]
         EC2["EC2 Instance\nDocker container\nport 8000"]
         NGX["Nginx Reverse Proxy\nport 80 → 8000\n300s timeout"]
     end
@@ -120,7 +120,7 @@ sequenceDiagram
     GH->>ECR: docker push :latest
 
     GH->>GH: zip deploy.zip (Dockerrun + .platform + .ebextensions)
-    GH->>S3: aws s3 cp deploy.zip s3://elasticbeanstalk-.../crag-rag-appp/<version>.zip
+    GH->>S3: aws s3 cp deploy.zip s3://elasticbeanstalk-.../crag-rag-app/<version>.zip
 
     GH->>EB: create-application-version (version label + S3 key)
     GH->>EB: update-environment (version label + option-settings with all env vars)
@@ -139,5 +139,3 @@ sequenceDiagram
 ```
 
 ---
-
-*Author: Sourangshu Pal*

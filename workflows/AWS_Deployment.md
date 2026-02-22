@@ -15,7 +15,7 @@ and deploys it to Elastic Beanstalk — with all environment variables injected 
 | AWS Region | `us-east-1` |
 | ECR Repository | `crag-rag-app` |
 | ECR Image URL | `685057748560.dkr.ecr.us-east-1.amazonaws.com/crag-rag-app:latest` |
-| EB Application | `crag-rag-appp` |
+| EB Application | `crag-rag-app` |
 | EB Environment | `crag-rag-prod` |
 | EB URL | `crag-rag-prod.eba-nwapefci.us-east-1.elasticbeanstalk.com` |
 | S3 Bucket (EB) | `elasticbeanstalk-us-east-1-685057748560` |
@@ -75,7 +75,7 @@ zip -r deploy.zip Dockerrun.aws.json .platform .ebextensions
 The bundle contains only the EB configuration files. The actual application runs from the ECR image declared in `Dockerrun.aws.json`. The `Dockerfile` is excluded (handled by `.ebignore`).
 
 #### 6. Upload Bundle to S3
-Uploads `deploy.zip` to the EB-managed S3 bucket under `crag-rag-appp/<version-label>.zip`.
+Uploads `deploy.zip` to the EB-managed S3 bucket under `crag-rag-app/<version-label>.zip`.
 
 #### 7. Create EB Application Version
 Registers the new S3 bundle as a named application version in EB (e.g. `app-3310941-20260222031422`).
@@ -226,7 +226,7 @@ This ensures every version is traceable back to its exact commit and timestamp.
 |---|---|---|
 | 504 Gateway Timeout on PDF upload | Nginx default 60s proxy timeout | Added `.platform/nginx/conf.d/timeout.conf` with 300s timeouts |
 | Docker build failure in CI | `uv.lock` was in `.gitignore`, empty file reached `uv sync` | Removed `uv.lock` from `.gitignore`, committed the lock file |
-| `No Application named 'crag-rag-app' found` | Workflow had wrong app name (2 p's vs 3 p's) | Corrected to `crag-rag-appp` |
+| `No Application named 'crag-rag-app' found` | Workflow had wrong app name (2 p's vs 3 p's) | Corrected to `crag-rag-app` |
 | `Waiter EnvironmentUpdated failed: Max attempts exceeded` | AWS built-in waiter has hardcoded ~6.5 min limit | Replaced with custom 40×30s polling loop (20 min total) |
 
 ---
